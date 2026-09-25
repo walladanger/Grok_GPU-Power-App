@@ -1,14 +1,29 @@
+import { useState } from "react";
+import { PowerGraph, type GraphPoint } from "./graph";
 import { combinedPower } from "./snapshot";
 import type { AdapterSnapshot, LimitUnit } from "./snapshot";
+
+type PopoutKind = "card" | "graph" | "sensors";
+
+const NO_POINTS: Record<string, GraphPoint[]> = {};
+const EMPTY_POINTS: GraphPoint[] = [];
+
+function noopPopout() {}
 
 export function Dashboard(props: {
   cards: AdapterSnapshot[];
   range: "1" | "5" | "15";
   staleIds: string[];
+  onPopout?: (cardId: string, kind: PopoutKind) => void;
+  pointsById?: Record<string, GraphPoint[]>;
 }) {
   const combined = combinedPower(props.cards);
   const drivers = uniqueDriverVersions(props.cards);
   const stale = new Set(props.staleIds);
+  const [pinnedUnix, setPinnedUnix] = useState<number | null>(null);
+  const [hoverUnix, setHoverUnix] = useState<number | null>(null);
+  const onPopout = props.onPopout ?? noopPopout;
+  const pointsById = props.pointsById ?? NO_POINTS;
   return (
     <main className="page bg-canvas text-ink">
       <header className="page-header">
@@ -24,14 +39,42 @@ export function Dashboard(props: {
       </header>
       <div className="cards" data-layout="cards" data-breakpoint="960">
         {props.cards.map((card, index) => (
-          <AdapterCard key={`${card.id}-${index}`} card={card} stale={stale.has(card.id)} />
+          <AdapterCard
+            key={`${card.id}-${index}`}
+            card={card}
+            stale={stale.has(card.id)}
+            points={pointsById[card.id] ?? EMPTY_POINTS}
+            pinnedUnix={pinnedUnix}
+            hoverUnix={hoverUnix}
+            onHoverUnix={setHoverUnix}
+            onPinUnix={setPinnedUnix}
+            onPopout={onPopout}
+          />
         ))}
       </div>
     </main>
   );
 }
 
-function AdapterCard({ card, stale }: { card: AdapterSnapshot; stale: boolean }) {
+function AdapterCard({
+  card,
+  stale,
+  points,
+  pinnedUnix,
+  hoverUnix,
+  onHoverUnix,
+  onPinUnix,
+  onPopout,
+}: {
+  card: AdapterSnapshot;
+  stale: boolean;
+  points: GraphPoint[];
+  pinnedUnix: number | null;
+  hoverUnix: number | null;
+  onHoverUnix: (unix: number | null) => void;
+  onPinUnix: (unix: number | null) => void;
+  onPopout: (cardId: string, kind: PopoutKind) => void;
+}) {
   const rows = readingRows(card);
   const instant = card.power_draw_instant_w;
   const enforced = enforcedWatts(card);
@@ -68,6 +111,20 @@ function AdapterCard({ card, stale }: { card: AdapterSnapshot; stale: boolean })
           ) : null}
         </div>
       ) : null}
+      <PowerGraph
+        cardId={card.id}
+        points={points}
+        pinnedUnix={pinnedUnix}
+        hoverUnix={hoverUnix}
+        enforcedWatts={enforced}
+        onHoverUnix={onHoverUnix}
+        onPinUnix={onPinUnix}
+      />
+      <div className="flex flex-wrap gap-2">
+        <PopoutButton cardId={card.id} kind="card" onPopout={onPopout} />
+        <PopoutButton cardId={card.id} kind="graph" onPopout={onPopout} />
+        <PopoutButton cardId={card.id} kind="sensors" onPopout={onPopout} />
+      </div>
       {card.throttle_reasons.length > 0 ? (
         <ul className="chips">
           {card.throttle_reasons.map((reason, index) => (
@@ -84,6 +141,23 @@ function AdapterCard({ card, stale }: { card: AdapterSnapshot; stale: boolean })
       ))}
       {card.error ? <p>{card.error}</p> : null}
     </article>
+  );
+}
+
+function PopoutButton(props: {
+  cardId: string;
+  kind: PopoutKind;
+  onPopout: (cardId: string, kind: PopoutKind) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="rounded-full border border-white/10 px-2 py-0.5 text-xs text-ink"
+      data-popout={props.kind}
+      onClick={() => props.onPopout(props.cardId, props.kind)}
+    >
+      Open in new window
+    </button>
   );
 }
 
