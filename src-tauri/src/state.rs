@@ -23,3 +23,22 @@ pub fn run_value_name() -> &'static str {
 pub fn show_event_name() -> &'static str {
     "Local\\GpuPowerShow"
 }
+
+/// Quote the exe the same way the sign-in task quotes it, so a profile path
+/// that contains spaces still starts.
+pub fn run_key_command(exe: &str) -> String {
+    format!("\"{exe}\"")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn run_key_quotes_a_path_with_spaces() {
+        assert_eq!(
+            run_key_command(r"C:\Users\Ada Lovelace\GpuPower.exe"),
+            "\"C:\\Users\\Ada Lovelace\\GpuPower.exe\""
+        );
+    }
+}

@@ -22,7 +22,9 @@ use gpupower_core::{
 };
 use nvml_map::{normalize_pci_bus_id, write_nvidia_watts, AmdSource, NvidiaSource};
 use serde::Serialize;
-use state::{launch_action, mutex_name, run_value_name, show_event_name, LaunchAction};
+use state::{
+    launch_action, mutex_name, run_key_command, run_value_name, show_event_name, LaunchAction,
+};
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use tauri::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem};
@@ -47,7 +49,8 @@ use windows_sys::Win32::System::Registry::{
 };
 use windows_sys::Win32::System::SystemInformation::GetLocalTime;
 use windows_sys::Win32::System::Threading::{
-    CreateEventW, CreateMutexW, SetEvent, WaitForSingleObject, INFINITE,
+    CreateEventW, CreateMutexW, OpenEventW, SetEvent, WaitForSingleObject, EVENT_MODIFY_STATE,
+    INFINITE,
 };
 use windows_sys::Win32::System::Time::{
     FileTimeToSystemTime, GetTimeZoneInformation, SystemTimeToTzSpecificLocalTime,
@@ -64,6 +67,7 @@ const DASHBOARD_LABEL: &str = "dashboard";
 const TRAY_ID: &str = "gpupower";
 const REAPPLY_TASK: &str = "GpuPower Reapply Limits";
 static INSTANCE_MUTEX: OnceLock<usize> = OnceLock::new();
+static SHOW_EVENT: OnceLock<usize> = OnceLock::new();
 
 struct FileWriter {
     file: fs::File,
@@ -209,6 +213,13 @@ fn instance_already_running() -> bool {
             true
         } else {
             let _ = INSTANCE_MUTEX.set(handle as usize);
+            // Hold the show event before Tauri starts so a second launch cannot
+            // create, signal, and destroy it before this process is listening.
+            let event_name = wide(show_event_name());
+            let event = CreateEventW(std::ptr::null(), 0, 0, event_name.as_ptr());
+            if !event.is_null() {
+                let _ = SHOW_EVENT.set(event as usize);
+            }
             false
         }
     }
@@ -217,7 +228,7 @@ fn instance_already_running() -> bool {
 fn signal_show_dashboard() {
     unsafe {
         let name = wide(show_event_name());
-        let handle = CreateEventW(std::ptr::null(), 0, 0, name.as_ptr());
+        let handle = OpenEventW(EVENT_MODIFY_STATE, 0, name.as_ptr());
         if !handle.is_null() {
             SetEvent(handle);
             CloseHandle(handle);
@@ -226,14 +237,9 @@ fn signal_show_dashboard() {
 }
 
 fn spawn_show_listener(app: tauri::AppHandle) {
-    let handle = unsafe {
-        let name = wide(show_event_name());
-        CreateEventW(std::ptr::null(), 0, 0, name.as_ptr())
-    };
-    if handle.is_null() {
+    let Some(&handle) = SHOW_EVENT.get() else {
         return;
-    }
-    let handle = handle as usize;
+    };
     std::thread::spawn(move || loop {
         if unsafe { WaitForSingleObject(handle as _, INFINITE) } == WAIT_OBJECT_0 {
             let app2 = app.clone();
@@ -2067,7 +2073,7 @@ fn set_run_key(enabled: bool) -> Result<(), String> {
         }
         let name = wide(run_value_name());
         let result = if enabled {
-            let value = wide(&exe.display().to_string());
+            let value = wide(&run_key_command(&exe.display().to_string()));
             RegSetValueExW(
                 key,
                 name.as_ptr(),

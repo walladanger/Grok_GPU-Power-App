@@ -12,9 +12,13 @@ use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 use windows_sys::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
 };
+
+// nvml-wrapper 0.11 stops at GPU max. This is the acoustic/target threshold.
+const NVML_TEMPERATURE_THRESHOLD_ACOUSTIC_CURR: u32 = 5;
 
 #[derive(Clone, Debug, Default)]
 pub struct RawNvidia {
@@ -39,13 +43,21 @@ pub struct RawNvidia {
     pub clock_sm_mhz: Option<u32>,
     pub clock_memory_mhz: Option<u32>,
     pub clock_video_mhz: Option<u32>,
+    pub clock_graphics_max_mhz: Option<u32>,
+    pub clock_memory_max_mhz: Option<u32>,
     pub util_gpu: Option<u32>,
     pub util_memory: Option<u32>,
+    pub util_encoder: Option<u32>,
+    pub util_decoder: Option<u32>,
     pub vram_used_mib: Option<u64>,
     pub vram_total_mib: Option<u64>,
     pub pstate: Option<String>,
     pub pcie_gen_current: Option<i32>,
+    pub pcie_gen_max: Option<i32>,
     pub pcie_width_current: Option<i32>,
+    pub pcie_width_max: Option<i32>,
+    pub encoder_sessions: Option<i32>,
+    pub encoder_fps: Option<u32>,
     pub throttle_reasons: Vec<String>,
     pub processes: Vec<ProcessRow>,
     pub driver_version: Option<String>,
@@ -83,13 +95,21 @@ pub fn snapshot_from_nvml(raw: &RawNvidia) -> AdapterSnapshot {
     snap.clock_sm_mhz = raw.clock_sm_mhz.map(f64::from);
     snap.clock_memory_mhz = raw.clock_memory_mhz.map(f64::from);
     snap.clock_video_mhz = raw.clock_video_mhz.map(f64::from);
+    snap.clock_graphics_max_mhz = raw.clock_graphics_max_mhz.map(f64::from);
+    snap.clock_memory_max_mhz = raw.clock_memory_max_mhz.map(f64::from);
     snap.util_gpu_percent = raw.util_gpu.map(f64::from);
     snap.util_memory_percent = raw.util_memory.map(f64::from);
+    snap.util_encoder_percent = raw.util_encoder.map(f64::from);
+    snap.util_decoder_percent = raw.util_decoder.map(f64::from);
     snap.vram_used_mib = raw.vram_used_mib.map(|mib| mib as f64);
     snap.vram_total_mib = raw.vram_total_mib.map(|mib| mib as f64);
     snap.pstate = raw.pstate.clone();
     snap.pcie_gen_current = raw.pcie_gen_current;
+    snap.pcie_gen_max = raw.pcie_gen_max;
     snap.pcie_width_current = raw.pcie_width_current;
+    snap.pcie_width_max = raw.pcie_width_max;
+    snap.encoder_sessions = raw.encoder_sessions;
+    snap.encoder_fps = raw.encoder_fps.map(f64::from);
     snap.throttle_reasons = raw.throttle_reasons.clone();
     snap.processes = raw.processes.clone();
     snap.driver_version = raw.driver_version.clone();
@@ -231,6 +251,7 @@ fn read_raw_nvidia(device: &Device<'_>, index: u32, driver_version: Option<Strin
         .map(|info| info.bus_id)
         .unwrap_or_default();
     let constraints = device.power_management_limit_constraints().ok();
+    let encoder = device.encoder_stats().ok();
     let mut raw = RawNvidia {
         uuid,
         name,
@@ -247,7 +268,7 @@ fn read_raw_nvidia(device: &Device<'_>, index: u32, driver_version: Option<Strin
             .ok()
             .map(f64::from),
         temp_memory_c: field_u32(device, NVML_FI_DEV_MEMORY_TEMP).map(f64::from),
-        temp_target_c: None,
+        temp_target_c: acoustic_target_c(device),
         temp_max_operating_c: device
             .temperature_threshold(TemperatureThreshold::GpuMax)
             .ok(),
@@ -262,8 +283,18 @@ fn read_raw_nvidia(device: &Device<'_>, index: u32, driver_version: Option<Strin
         clock_sm_mhz: device.clock_info(Clock::SM).ok(),
         clock_memory_mhz: device.clock_info(Clock::Memory).ok(),
         clock_video_mhz: device.clock_info(Clock::Video).ok(),
+        clock_graphics_max_mhz: device.max_clock_info(Clock::Graphics).ok(),
+        clock_memory_max_mhz: device.max_clock_info(Clock::Memory).ok(),
         util_gpu: None,
         util_memory: None,
+        util_encoder: device
+            .encoder_utilization()
+            .ok()
+            .map(|info| info.utilization),
+        util_decoder: device
+            .decoder_utilization()
+            .ok()
+            .map(|info| info.utilization),
         vram_used_mib: None,
         vram_total_mib: None,
         pstate: device.performance_state().ok().map(pstate_label),
@@ -271,10 +302,22 @@ fn read_raw_nvidia(device: &Device<'_>, index: u32, driver_version: Option<Strin
             .current_pcie_link_gen()
             .ok()
             .and_then(|gen| i32::try_from(gen).ok()),
+        pcie_gen_max: device
+            .max_pcie_link_gen()
+            .ok()
+            .and_then(|gen| i32::try_from(gen).ok()),
         pcie_width_current: device
             .current_pcie_link_width()
             .ok()
             .and_then(|width| i32::try_from(width).ok()),
+        pcie_width_max: device
+            .max_pcie_link_width()
+            .ok()
+            .and_then(|width| i32::try_from(width).ok()),
+        encoder_sessions: encoder
+            .as_ref()
+            .and_then(|stats| i32::try_from(stats.session_count).ok()),
+        encoder_fps: encoder.as_ref().map(|stats| stats.average_fps),
         throttle_reasons: device
             .current_throttle_reasons()
             .map(throttle_names)
@@ -291,6 +334,32 @@ fn read_raw_nvidia(device: &Device<'_>, index: u32, driver_version: Option<Strin
         raw.vram_total_mib = Some(memory.total / (1024 * 1024));
     }
     raw
+}
+
+fn acoustic_target_c(device: &Device<'_>) -> Option<u32> {
+    type GetThreshold = unsafe extern "C" fn(*mut std::ffi::c_void, u32, *mut u32) -> u32;
+    unsafe {
+        let module = GetModuleHandleW(wide("nvml.dll").as_ptr());
+        if module.is_null() {
+            return None;
+        }
+        let Some(symbol) = GetProcAddress(module, b"nvmlDeviceGetTemperatureThreshold\0".as_ptr())
+        else {
+            return None;
+        };
+        let get_threshold: GetThreshold = std::mem::transmute(symbol);
+        let mut temp = 0u32;
+        let status = get_threshold(
+            device.handle().cast::<std::ffi::c_void>(),
+            NVML_TEMPERATURE_THRESHOLD_ACOUSTIC_CURR,
+            &mut temp,
+        );
+        if status == 0 {
+            Some(temp)
+        } else {
+            None
+        }
+    }
 }
 
 fn field_u32(device: &Device<'_>, id: u32) -> Option<u32> {
