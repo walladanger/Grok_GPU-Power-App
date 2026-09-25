@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-detailed-debug"
+description = "Enables the set_detailed_debug command without any pre-configured scope."
+commands.allow = ["set_detailed_debug"]
+
+[[permission]]
+identifier = "deny-set-detailed-debug"
+description = "Denies the set_detailed_debug command without any pre-configured scope."
+commands.deny = ["set_detailed_debug"]
