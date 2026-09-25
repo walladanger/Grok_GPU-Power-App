@@ -3,6 +3,7 @@
 pub mod drivers;
 pub mod export;
 pub mod fixtures;
+pub mod helper;
 pub mod history;
 pub mod limit;
 pub mod logfmt;
@@ -17,6 +18,7 @@ pub mod snapshot;
 pub use drivers::*;
 pub use export::*;
 pub use fixtures::*;
+pub use helper::*;
 pub use history::*;
 pub use limit::*;
 pub use logfmt::*;
