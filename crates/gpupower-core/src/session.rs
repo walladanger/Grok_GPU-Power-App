@@ -1,3 +1,4 @@
+use crate::history::History;
 use crate::snapshot::AdapterSnapshot;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -11,7 +12,7 @@ pub struct StampedSample {
 pub struct SessionCard {
     pub snapshot: AdapterSnapshot,
     pub offline_since: Option<String>,
-    pub history: Vec<StampedSample>,
+    pub history: History,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -26,7 +27,7 @@ pub fn open_session(seen: &[AdapterSnapshot]) -> Session {
             .map(|snapshot| SessionCard {
                 snapshot: snapshot.clone(),
                 offline_since: None,
-                history: Vec::new(),
+                history: History::new(),
             })
             .collect(),
     }
@@ -55,10 +56,12 @@ pub fn reconcile(session: &Session, seen: &[AdapterSnapshot], now: &str) -> Sess
         if cards.iter().any(|card| card.snapshot.id == snapshot.id) {
             continue;
         }
+        let mut history = History::new();
+        history.push(stamp(now, snapshot));
         cards.push(SessionCard {
             snapshot: snapshot.clone(),
             offline_since: None,
-            history: vec![stamp(now, snapshot)],
+            history,
         });
     }
     Session { cards }
@@ -67,8 +70,8 @@ pub fn reconcile(session: &Session, seen: &[AdapterSnapshot], now: &str) -> Sess
 fn stamp(now: &str, snapshot: &AdapterSnapshot) -> StampedSample {
     StampedSample {
         at: now.to_string(),
-        // `now` is a display stamp. This function is not given a unix instant.
-        unix: 0,
+        // An integer `now` is the shared unix second. Any other stamp stays at 0.
+        unix: now.parse().unwrap_or(0),
         snapshot: snapshot.clone(),
     }
 }
@@ -107,6 +110,22 @@ mod tests {
         assert_eq!(gone.history.len(), 1);
         assert_eq!(gone.history[0].snapshot.id, a.id);
         assert_ne!(a.id, b.id);
+    }
+
+    #[test]
+    fn reconcile_integer_now_is_unix_and_other_stamps_stay_zero() {
+        let card = rtx3090_primary();
+        let opened = open_session(&[card.clone()]);
+        let at_zero = reconcile(&opened, &[card.clone()], "0");
+        assert_eq!(at_zero.cards[0].history[0].at, "0");
+        assert_eq!(at_zero.cards[0].history[0].unix, 0);
+        let later = reconcile(&at_zero, &[card.clone()], "901");
+        assert_eq!(later.cards[0].history.len(), 1);
+        assert_eq!(later.cards[0].history[0].unix, 901);
+        let labeled = reconcile(&later, &[card], "t1");
+        assert_eq!(labeled.cards[0].history.len(), 2);
+        assert_eq!(labeled.cards[0].history[1].at, "t1");
+        assert_eq!(labeled.cards[0].history[1].unix, 0);
     }
 
     #[test]
