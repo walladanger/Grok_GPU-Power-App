@@ -14,9 +14,7 @@ pub enum IconMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SavedLimit {
-    #[serde(default)]
     pub unit: LimitUnit,
-    #[serde(default)]
     pub value: i32,
 }
 
@@ -141,6 +139,14 @@ mod tests {
             }
             LoadSettings::Corrupt => panic!("empty object is valid"),
         }
+    }
+
+    #[test]
+    fn saved_limit_missing_unit_or_value_is_corrupt() {
+        assert!(matches!(
+            load_settings("{\"limits\":{\"GPU-a\":{}}}"),
+            LoadSettings::Corrupt
+        ));
     }
 
     #[test]
