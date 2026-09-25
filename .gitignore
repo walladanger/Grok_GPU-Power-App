@@ -1,0 +1,4 @@
+.worktrees/
+target/
+node_modules/
+ui/dist/
