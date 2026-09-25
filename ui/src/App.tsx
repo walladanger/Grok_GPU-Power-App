@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Dashboard, DelayedHelp } from "./cards";
+import { Dashboard, DelayedHelp, FocusedView } from "./cards";
 import { amdRaphael, gtx1050, primary3090, secondary3090 } from "./fixtures";
 import type { GraphPoint } from "./graph";
 import type { AdapterSnapshot, Vendor } from "./snapshot";
@@ -91,8 +91,7 @@ type TauriInternals = {
   unregisterCallback: (id: number) => void;
 };
 
-const UNAVAILABLE_ROLLBACK =
-  "Rollback is unavailable because Windows has no previous display driver for this device.";
+const NO_PREVIOUS_DRIVER = "Windows has no previous display driver for this device.";
 
 export function App(props: { invoke?: Invoke; cards?: PresentCard[]; packages?: DriverPackage[] }) {
   const call = useInvoke(props.invoke);
@@ -244,25 +243,42 @@ export function App(props: { invoke?: Invoke; cards?: PresentCard[]; packages?: 
   async function applyAll() {
     if (!shared) return;
     try {
-      const args = "presetPercent" in shared ? { presetPercent: shared.presetPercent } : shared;
-      const plans = asPlans(await call("plan_apply", args));
-      const skipped = plans.filter((plan) => plan.kind === "skipped").map((plan) => plan.name ?? plan.id ?? "");
+      const request = "presetPercent" in shared ? { presetPercent: shared.presetPercent } : shared;
+      const plans = asPlans(await call("plan_apply", request));
+      const writes = plans.filter(
+        (plan) => plan.kind === "write" && plan.value != null && plan.unit && plan.id,
+      );
+      if (writes.length === 0) {
+        const names = plans
+          .filter((plan) => plan.kind === "refused")
+          .map((plan) => plan.name || plan.id || "")
+          .filter((name) => name.length > 0);
+        setNotice(names.length > 0 ? names.join(", ") : "Nothing to apply.");
+        return;
+      }
+      const lines: string[] = [];
       for (const plan of plans) {
+        const name = plan.name || plan.id || "card";
+        if (plan.kind === "refused") {
+          lines.push(`${name} was refused`);
+          continue;
+        }
+        if (plan.kind === "skipped") {
+          lines.push(`${name} left unchanged`);
+          continue;
+        }
         if (plan.kind !== "write" || plan.value == null || !plan.unit || !plan.id) continue;
-        await runHelper([
-          "--apply-limit",
-          "--id",
-          plan.id,
-          "--unit",
-          plan.unit,
-          "--value",
-          String(plan.value),
-        ]);
+        try {
+          const report = await call("helper_request", {
+            args: ["--apply-limit", "--id", plan.id, "--unit", plan.unit, "--value", String(plan.value)],
+          });
+          const message = reportMessage(report);
+          lines.push(message ? `${name}: ${message}` : `${name}: Applied.`);
+        } catch (err) {
+          lines.push(`${name}: ${errorText(err)}`);
+        }
       }
-      const named = skipped.filter((name) => name.length > 0);
-      if (named.length > 0) {
-        setNotice((prev) => `${prev ? `${prev} ` : ""}Left unchanged: ${named.join(", ")}`);
-      }
+      setNotice(lines.join(" "));
     } catch (err) {
       setNotice(errorText(err));
     }
@@ -429,10 +445,11 @@ export function App(props: { invoke?: Invoke; cards?: PresentCard[]; packages?: 
                 const name = rollbackName(card, cards);
                 if (!candidate) {
                   return (
-                    <span key={deviceId} className="inline-flex" title={UNAVAILABLE_ROLLBACK}>
+                    <span key={deviceId} className="inline-flex flex-col gap-1">
                       <button type="button" className={controlClass} disabled style={{ pointerEvents: "none" }}>
                         {name}
                       </button>
+                      <p className="text-xs">{NO_PREVIOUS_DRIVER}</p>
                     </span>
                   );
                 }
@@ -450,6 +467,35 @@ export function App(props: { invoke?: Invoke; cards?: PresentCard[]; packages?: 
       </section>
     </div>
   );
+
+  const popout = readPopout();
+  if (popout) {
+    const focus = cards.find((card) => card.id === popout.id) ?? null;
+    const points = focus ? (pointsFor([focus], range)[focus.id] ?? []) : [];
+    const openPopout = (cardId: string, kind: "card" | "graph" | "sensors") => {
+      void call("open_popout", { kind, id: cardId }).catch((err) => setNotice(errorText(err)));
+    };
+    return (
+      <FocusedView
+        card={focus}
+        kind={popout.kind}
+        points={points}
+        stale={focus ? (live?.stale_ids ?? []).includes(focus.id) : false}
+        onPopout={openPopout}
+        extra={
+          focus && popout.kind === "card" && focus.can_set_limit ? (
+            <CardLimits
+              card={focus}
+              capableIndex={0}
+              call={call}
+              onNotice={setNotice}
+              onTarget={setShared}
+            />
+          ) : null
+        }
+      />
+    );
+  }
 
   return (
     <>
@@ -534,21 +580,6 @@ function CardLimits(props: {
       setPlans([]);
       return;
     }
-    const limit = props.card.limit;
-    if (limit && (parsed < limit.min || parsed > limit.max)) {
-      setPlans([
-        {
-          kind: "refused",
-          id: props.card.id,
-          name: props.card.name,
-          min: limit.min,
-          max: limit.max,
-          unit,
-        },
-      ]);
-    } else {
-      setPlans([]);
-    }
     props.onTarget({ value: parsed, unit });
     try {
       const result = asPlans(
@@ -558,6 +589,7 @@ function CardLimits(props: {
       setPlans(result);
     } catch (err) {
       if (generation.current !== token) return;
+      setPlans([]);
       props.onNotice(errorText(err));
     }
   }
@@ -857,6 +889,17 @@ function toPoint(sample: HistorySample): GraphPoint {
     util_gpu: sample.util_gpu_percent ?? null,
     detail: parts.filter((part) => part.length > 0).join(", "),
   };
+}
+
+function readPopout(): { kind: "card" | "graph" | "sensors"; id: string } | null {
+  const value = (window as Window & { __GPUPOWER_POPOUT__?: { kind?: unknown; id?: unknown } | null })
+    .__GPUPOWER_POPOUT__;
+  if (!value || typeof value !== "object") return null;
+  const { kind, id } = value;
+  if ((kind === "card" || kind === "graph" || kind === "sensors") && typeof id === "string" && id) {
+    return { kind, id };
+  }
+  return null;
 }
 
 function previewCards(): PresentCard[] {

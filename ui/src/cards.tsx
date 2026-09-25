@@ -154,6 +154,71 @@ function AdapterCard({
   );
 }
 
+export function FocusedView(props: {
+  card: AdapterSnapshot | null;
+  kind: PopoutKind;
+  points: GraphPoint[];
+  stale: boolean;
+  extra?: ReactNode;
+  onPopout?: (cardId: string, kind: PopoutKind) => void;
+}) {
+  const [pinnedUnix, setPinnedUnix] = useState<number | null>(null);
+  const [hoverUnix, setHoverUnix] = useState<number | null>(null);
+  if (!props.card) {
+    return (
+      <main className="page bg-canvas text-ink">
+        <p>This display is not in the latest snapshot.</p>
+      </main>
+    );
+  }
+  if (props.kind === "graph") {
+    return (
+      <main className="page bg-canvas text-ink">
+        <h2>{props.card.name}</h2>
+        {props.stale ? <p className="stale">updating</p> : null}
+        <PowerGraph
+          cardId={props.card.id}
+          points={props.points}
+          pinnedUnix={pinnedUnix}
+          hoverUnix={hoverUnix}
+          enforcedWatts={enforcedWatts(props.card)}
+          onHoverUnix={setHoverUnix}
+          onPinUnix={setPinnedUnix}
+        />
+      </main>
+    );
+  }
+  if (props.kind === "sensors") {
+    const rows = readingRows(props.card);
+    return (
+      <main className="page bg-canvas text-ink">
+        <h2>{props.card.name}</h2>
+        {props.stale ? <p className="stale">updating</p> : null}
+        <dl className="sensors">
+          {rows.map((row) => (
+            <Reading key={row.label} label={row.label} value={row.value} />
+          ))}
+        </dl>
+      </main>
+    );
+  }
+  return (
+    <main className="page bg-canvas text-ink">
+      <AdapterCard
+        card={props.card}
+        stale={props.stale}
+        points={props.points}
+        pinnedUnix={pinnedUnix}
+        hoverUnix={hoverUnix}
+        onHoverUnix={setHoverUnix}
+        onPinUnix={setPinnedUnix}
+        onPopout={props.onPopout ?? noopPopout}
+        extra={props.extra ?? null}
+      />
+    </main>
+  );
+}
+
 function PopoutButton(props: {
   cardId: string;
   kind: PopoutKind;

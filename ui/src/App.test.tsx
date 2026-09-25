@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 import { App, type DriverPackage } from "./App";
-import { amdRaphael, primary3090, secondary3090 } from "./fixtures";
+import { amdRaphael, gtx1050, primary3090, secondary3090 } from "./fixtures";
 import { helpText } from "./help";
 
 type Call = { cmd: string; args?: Record<string, unknown> };
@@ -274,7 +274,85 @@ test("snapshot events replace fixture cards when the shell is present", async ()
   expect(screen.getByRole("button", { name: "Combined watts" })).toHaveAttribute("aria-pressed", "true");
 });
 
+test("apply to all keeps one notice that names a failed card and every refusal", async () => {
+  const left = { ...primary3090(), id: "GPU-a", name: "Left 3090" };
+  const right = { ...secondary3090(), id: "GPU-b", name: "Right 3090" };
+  render(<App cards={[left, right]} invoke={async (cmd, args) => {
+    if (cmd === "plan_apply" && args && "presetPercent" in args) {
+      return [
+        { kind: "write", id: "GPU-a", name: "Left 3090", unit: "watts", value: 280 },
+        { kind: "write", id: "GPU-b", name: "Right 3090", unit: "watts", value: 280 },
+      ];
+    }
+    if (cmd === "plan_apply") {
+      return [
+        { kind: "refused", id: "GPU-a", name: "Left 3090", min: 100, max: 350 },
+        { kind: "refused", id: "GPU-b", name: "Right 3090", min: 100, max: 350 },
+      ];
+    }
+    if (cmd === "helper_request") {
+      const argv = Array.isArray(args?.args) ? args.args.map(String) : [];
+      const id = argv[argv.indexOf("--id") + 1];
+      if (id === "GPU-a") throw "Administrator approval was cancelled. The limit is unchanged.";
+      return { ok: true, message: "Applied.", reboot_required: false };
+    }
+    return [];
+  }} />);
+  fireEvent.click(screen.getAllByRole("button", { name: /80%/ })[0]);
+  fireEvent.click(screen.getByRole("button", { name: "Apply to all" }));
+  const mixed = await screen.findByRole("status");
+  await waitFor(() => {
+    const text = mixed.textContent ?? "";
+    expect(text).toContain("Left 3090");
+    expect(text).toContain("Administrator approval was cancelled");
+  });
+  fireEvent.change(screen.getAllByLabelText(/Custom limit/)[0], { target: { value: "50" } });
+  fireEvent.click(screen.getByRole("button", { name: "Apply to all" }));
+  await waitFor(() => {
+    const text = screen.getByRole("status").textContent ?? "";
+    expect(text).toContain("Left 3090");
+    expect(text).toContain("Right 3090");
+    expect(text).not.toContain("Administrator approval was cancelled");
+  });
+});
+
+test("a popped-out window shows one card, graph, or sensor grid", () => {
+  const card = primary3090();
+  const other = gtx1050();
+  const pop = window as unknown as { __GPUPOWER_POPOUT__?: { kind: string; id: string } | null };
+  pop.__GPUPOWER_POPOUT__ = { kind: "graph", id: card.id };
+  const graphView = render(<App cards={[card, other]} invoke={async () => []} />);
+  expect(screen.getByTestId(`graph-${card.id}`)).toBeInTheDocument();
+  expect(screen.queryByText("NVIDIA GeForce GTX 1050")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Settings" })).not.toBeInTheDocument();
+  expect(screen.queryByText("Average power")).not.toBeInTheDocument();
+  graphView.unmount();
+
+  pop.__GPUPOWER_POPOUT__ = { kind: "sensors", id: card.id };
+  const sensorsView = render(<App cards={[card, other]} invoke={async () => []} />);
+  expect(screen.getByText("Average power")).toBeInTheDocument();
+  expect(screen.queryByTestId(`graph-${card.id}`)).not.toBeInTheDocument();
+  expect(screen.queryByText("NVIDIA GeForce GTX 1050")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Settings" })).not.toBeInTheDocument();
+  sensorsView.unmount();
+
+  pop.__GPUPOWER_POPOUT__ = { kind: "card", id: card.id };
+  const cardView = render(<App cards={[card, other]} invoke={async () => []} />);
+  expect(screen.getByRole("heading", { name: "NVIDIA GeForce RTX 3090" })).toBeInTheDocument();
+  expect(screen.getByTestId(`graph-${card.id}`)).toBeInTheDocument();
+  expect(screen.getByText("Average power")).toBeInTheDocument();
+  expect(screen.queryByText("NVIDIA GeForce GTX 1050")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Settings" })).not.toBeInTheDocument();
+  cardView.unmount();
+
+  pop.__GPUPOWER_POPOUT__ = null;
+  render(<App cards={[card, other]} invoke={async () => []} />);
+  expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument();
+  expect(screen.getByText("NVIDIA GeForce GTX 1050")).toBeInTheDocument();
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
   delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  delete (window as unknown as { __GPUPOWER_POPOUT__?: unknown }).__GPUPOWER_POPOUT__;
 });
