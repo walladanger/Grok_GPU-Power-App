@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/gpupower-core"]
+resolver = "2"
