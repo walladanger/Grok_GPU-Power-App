@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { cloneElement, useEffect, useId, useRef, useState, type ReactElement } from "react";
 import { PowerGraph, type GraphPoint } from "./graph";
+import { helpText, type HelpContext } from "./help";
 import { combinedPower } from "./snapshot";
 import type { AdapterSnapshot, LimitUnit } from "./snapshot";
 
@@ -149,15 +150,105 @@ function PopoutButton(props: {
   kind: PopoutKind;
   onPopout: (cardId: string, kind: PopoutKind) => void;
 }) {
+  const id =
+    props.kind === "card"
+      ? "open-card-window"
+      : props.kind === "graph"
+        ? "open-graph-window"
+        : "open-sensors-window";
   return (
-    <button
-      type="button"
-      className="rounded-full border border-white/10 px-2 py-0.5 text-xs text-ink"
-      data-popout={props.kind}
-      onClick={() => props.onPopout(props.cardId, props.kind)}
-    >
-      Open in new window
-    </button>
+    <DelayedHelp id={id}>
+      <button
+        type="button"
+        className="rounded-full border border-white/10 px-2 py-0.5 text-xs text-ink"
+        data-popout={props.kind}
+        onClick={() => props.onPopout(props.cardId, props.kind)}
+      >
+        Open in new window
+      </button>
+    </DelayedHelp>
+  );
+}
+
+// 500ms hover help for controls. PowerGraph sample readouts stay immediate and must not use this timer.
+function DelayedHelp(props: { id: string; ctx?: HelpContext; children: ReactElement }) {
+  const text = helpText(props.id, props.ctx);
+  const tipId = useId();
+  const hostRef = useRef<HTMLSpanElement>(null);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    const control = host?.querySelector<HTMLElement>("button, a, input, select, textarea");
+    if (!control) return;
+    let timer: ReturnType<typeof window.setTimeout> | null = null;
+    let focused = false;
+    let pointerInside = false;
+    let hoverReady = false;
+    const clearTimer = () => {
+      if (timer != null) {
+        window.clearTimeout(timer);
+        timer = null;
+      }
+    };
+    const sync = () => {
+      setOpen(focused || (pointerInside && hoverReady));
+    };
+    const onMouseEnter = () => {
+      pointerInside = true;
+      if (!hoverReady) {
+        clearTimer();
+        timer = window.setTimeout(() => {
+          timer = null;
+          hoverReady = true;
+          sync();
+        }, 500);
+      }
+      sync();
+    };
+    const onMouseLeave = () => {
+      pointerInside = false;
+      hoverReady = false;
+      clearTimer();
+      sync();
+    };
+    const onFocus = () => {
+      focused = true;
+      sync();
+    };
+    const onBlur = () => {
+      focused = false;
+      sync();
+    };
+    control.addEventListener("mouseenter", onMouseEnter);
+    control.addEventListener("mouseleave", onMouseLeave);
+    control.addEventListener("focus", onFocus);
+    control.addEventListener("blur", onBlur);
+    return () => {
+      clearTimer();
+      control.removeEventListener("mouseenter", onMouseEnter);
+      control.removeEventListener("mouseleave", onMouseLeave);
+      control.removeEventListener("focus", onFocus);
+      control.removeEventListener("blur", onBlur);
+    };
+  }, []);
+
+  return (
+    <span ref={hostRef} className="relative inline-flex">
+      {cloneElement(props.children, {
+        title: text,
+        "aria-describedby": open ? tipId : undefined,
+      })}
+      {open ? (
+        <span
+          id={tipId}
+          role="tooltip"
+          className="pointer-events-none absolute left-0 top-full z-10 mt-1 max-w-xs rounded border border-white/10 bg-card px-2 py-1 text-xs text-ink"
+        >
+          {text}
+        </span>
+      ) : null}
+    </span>
   );
 }
 
