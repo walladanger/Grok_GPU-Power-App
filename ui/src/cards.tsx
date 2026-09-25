@@ -1,4 +1,4 @@
-import { cloneElement, useEffect, useId, useRef, useState, type ReactElement } from "react";
+import { cloneElement, useEffect, useId, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { PowerGraph, type GraphPoint } from "./graph";
 import { helpText, type HelpContext } from "./help";
 import { combinedPower } from "./snapshot";
@@ -17,6 +17,8 @@ export function Dashboard(props: {
   staleIds: string[];
   onPopout?: (cardId: string, kind: PopoutKind) => void;
   pointsById?: Record<string, GraphPoint[]>;
+  headerExtra?: ReactNode;
+  cardExtra?: (card: AdapterSnapshot) => ReactNode;
 }) {
   const combined = combinedPower(props.cards);
   const drivers = uniqueDriverVersions(props.cards);
@@ -28,7 +30,9 @@ export function Dashboard(props: {
   return (
     <main className="page bg-canvas text-ink">
       <header className="page-header">
-        <p className="combined">{combined.watts.toFixed(1)} W</p>
+        <p className="combined" data-tauri-drag-region="">
+          {combined.watts.toFixed(1)} W
+        </p>
         <p className="muted">{props.cards.length} adapters</p>
         {drivers.map((version) => (
           <p key={version}>{version}</p>
@@ -37,6 +41,7 @@ export function Dashboard(props: {
           <p>no power reading: {combined.missing_names.join(", ")}</p>
         ) : null}
         <p className="muted">{props.range} min</p>
+        {props.headerExtra}
       </header>
       <div className="cards" data-layout="cards" data-breakpoint="960">
         {props.cards.map((card, index) => (
@@ -50,6 +55,7 @@ export function Dashboard(props: {
             onHoverUnix={setHoverUnix}
             onPinUnix={setPinnedUnix}
             onPopout={onPopout}
+            extra={props.cardExtra?.(card) ?? null}
           />
         ))}
       </div>
@@ -66,6 +72,7 @@ function AdapterCard({
   onHoverUnix,
   onPinUnix,
   onPopout,
+  extra,
 }: {
   card: AdapterSnapshot;
   stale: boolean;
@@ -75,6 +82,7 @@ function AdapterCard({
   onHoverUnix: (unix: number | null) => void;
   onPinUnix: (unix: number | null) => void;
   onPopout: (cardId: string, kind: PopoutKind) => void;
+  extra: ReactNode;
 }) {
   const rows = readingRows(card);
   const instant = card.power_draw_instant_w;
@@ -121,6 +129,7 @@ function AdapterCard({
         onHoverUnix={onHoverUnix}
         onPinUnix={onPinUnix}
       />
+      {extra}
       <div className="flex flex-wrap gap-2">
         <PopoutButton cardId={card.id} kind="card" onPopout={onPopout} />
         <PopoutButton cardId={card.id} kind="graph" onPopout={onPopout} />
@@ -171,7 +180,8 @@ function PopoutButton(props: {
 }
 
 // 500ms hover help for controls. PowerGraph sample readouts stay immediate and must not use this timer.
-function DelayedHelp(props: { id: string; ctx?: HelpContext; children: ReactElement }) {
+// Hover listens on the host so a disabled control, which does not receive pointer events, still explains itself.
+export function DelayedHelp(props: { id: string; ctx?: HelpContext; children: ReactElement }) {
   const text = helpText(props.id, props.ctx);
   const tipId = useId();
   const hostRef = useRef<HTMLSpanElement>(null);
@@ -179,8 +189,8 @@ function DelayedHelp(props: { id: string; ctx?: HelpContext; children: ReactElem
 
   useEffect(() => {
     const host = hostRef.current;
-    const control = host?.querySelector<HTMLElement>("button, a, input, select, textarea");
-    if (!control) return;
+    if (!host) return;
+    const control = host.querySelector<HTMLElement>("button, a, input, select, textarea");
     let timer: ReturnType<typeof window.setTimeout> | null = null;
     let focused = false;
     let pointerInside = false;
@@ -220,21 +230,21 @@ function DelayedHelp(props: { id: string; ctx?: HelpContext; children: ReactElem
       focused = false;
       sync();
     };
-    control.addEventListener("mouseenter", onMouseEnter);
-    control.addEventListener("mouseleave", onMouseLeave);
-    control.addEventListener("focus", onFocus);
-    control.addEventListener("blur", onBlur);
+    host.addEventListener("mouseenter", onMouseEnter);
+    host.addEventListener("mouseleave", onMouseLeave);
+    control?.addEventListener("focus", onFocus);
+    control?.addEventListener("blur", onBlur);
     return () => {
       clearTimer();
-      control.removeEventListener("mouseenter", onMouseEnter);
-      control.removeEventListener("mouseleave", onMouseLeave);
-      control.removeEventListener("focus", onFocus);
-      control.removeEventListener("blur", onBlur);
+      host.removeEventListener("mouseenter", onMouseEnter);
+      host.removeEventListener("mouseleave", onMouseLeave);
+      control?.removeEventListener("focus", onFocus);
+      control?.removeEventListener("blur", onBlur);
     };
   }, []);
 
   return (
-    <span ref={hostRef} className="relative inline-flex">
+    <span ref={hostRef} className="relative inline-flex" title={text}>
       {cloneElement(props.children, {
         title: text,
         "aria-describedby": open ? tipId : undefined,
