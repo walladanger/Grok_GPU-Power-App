@@ -1,11 +1,14 @@
 use std::collections::VecDeque;
 use std::ops::Index;
 
+use serde::{Deserialize, Serialize};
+
 use crate::session::StampedSample;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum GraphRange {
     Min1,
+    #[default]
     Min5,
     Min15,
 }
