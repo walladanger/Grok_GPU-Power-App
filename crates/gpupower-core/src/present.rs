@@ -22,9 +22,6 @@ pub fn combined_power(cards: &[AdapterSnapshot]) -> CombinedPower {
 }
 
 pub fn icon_number(mode: IconMode, cards: &[AdapterSnapshot]) -> Option<i32> {
-    let cards = cards
-        .iter()
-        .filter(|card| !percent_without_watt_ceiling(card));
     match mode {
         IconMode::Combined => {
             let mut watts = 0.0;
@@ -70,21 +67,13 @@ pub fn is_stale(age_ms: u64) -> bool {
     age_ms > 3000
 }
 
-// Percent-unit cards with no watt ceiling are left out of every icon mode.
-fn percent_without_watt_ceiling(card: &AdapterSnapshot) -> bool {
-    matches!(
-        card.limit.as_ref().map(|limit| limit.unit),
-        Some(LimitUnit::Percent)
-    ) && card.watt_ceiling_w.is_none()
-}
-
 // (value + 0.5) as i32 is half-up for a non-negative tray reading.
 fn round_non_negative(value: f64) -> i32 {
     (value + 0.5) as i32
 }
 
-// Watts cards use enforced watts. Percent cards use their watt ceiling.
-// A non-positive cap is not a usable percent base.
+// Highest percent only. Combined and busiest still count the card's watts.
+// Watts cards use a positive enforced limit. Percent cards use a positive ceiling.
 fn percent_of_limit(card: &AdapterSnapshot) -> Option<f64> {
     let instant = card.power_draw_instant_w?;
     let limit = card.limit.as_ref()?;
@@ -109,7 +98,30 @@ fn percent_of_limit(card: &AdapterSnapshot) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{gtx1050_error, rtx3090_primary, rtx3090_secondary, IconMode};
+    use crate::{
+        empty_snapshot, gtx1050_error, rtx3090_primary, rtx3090_secondary, IconMode, LimitRange,
+        LimitUnit, Vendor,
+    };
+
+    fn percent_card_without_ceiling() -> AdapterSnapshot {
+        let mut card = empty_snapshot(
+            "amd-percent".into(),
+            Vendor::Amd,
+            "AMD Radeon Graphics".into(),
+        );
+        card.can_set_limit = false;
+        card.watt_ceiling_w = None;
+        card.power_draw_instant_w = Some(40.0);
+        card.limit = Some(LimitRange {
+            unit: LimitUnit::Percent,
+            min: -30,
+            max: 15,
+            default_value: 0,
+            current: 0,
+            enforced: 0,
+        });
+        card
+    }
 
     #[test]
     fn combined_power_sums_cards_that_have_a_reading() {
@@ -128,6 +140,14 @@ mod tests {
         let cards = [rtx3090_primary(), rtx3090_secondary()];
         assert_eq!(icon_number(IconMode::Combined, &cards), Some(16));
         assert_eq!(icon_number(IconMode::Busiest, &cards), Some(8));
+        assert_eq!(icon_number(IconMode::HighestPercent, &cards), Some(2));
+    }
+
+    #[test]
+    fn percent_without_ceiling_counts_toward_combined_and_busiest() {
+        let cards = [percent_card_without_ceiling(), rtx3090_primary()];
+        assert_eq!(icon_number(IconMode::Combined, &cards), Some(48));
+        assert_eq!(icon_number(IconMode::Busiest, &cards), Some(40));
         assert_eq!(icon_number(IconMode::HighestPercent, &cards), Some(2));
     }
 
