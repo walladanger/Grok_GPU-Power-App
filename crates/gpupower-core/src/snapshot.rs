@@ -1,6 +1,9 @@
+use serde::Serialize;
+
 use crate::LimitRange;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Vendor {
     Nvidia,
     Amd,
