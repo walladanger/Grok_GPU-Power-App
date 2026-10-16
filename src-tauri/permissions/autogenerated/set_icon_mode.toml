@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-icon-mode"
+description = "Enables the set_icon_mode command without any pre-configured scope."
+commands.allow = ["set_icon_mode"]
+
+[[permission]]
+identifier = "deny-set-icon-mode"
+description = "Denies the set_icon_mode command without any pre-configured scope."
+commands.deny = ["set_icon_mode"]

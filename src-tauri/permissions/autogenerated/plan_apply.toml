@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-plan-apply"
+description = "Enables the plan_apply command without any pre-configured scope."
+commands.allow = ["plan_apply"]
+
+[[permission]]
+identifier = "deny-plan-apply"
+description = "Denies the plan_apply command without any pre-configured scope."
+commands.deny = ["plan_apply"]

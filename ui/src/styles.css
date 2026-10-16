@@ -1,0 +1,143 @@
+@import "@fontsource/geist-sans/400.css";
+@import "@fontsource/geist-sans/500.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  background: #0a0a0a;
+  color-scheme: dark;
+}
+
+body {
+  background: #0a0a0a;
+  color: #fafafa;
+  font-family: "Geist Sans", "Segoe UI", sans-serif;
+  margin: 0;
+}
+
+.page {
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.page-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.page-header p,
+.card-id,
+.card-status,
+.stale,
+.process {
+  margin: 0;
+}
+
+.combined {
+  font-size: 28px;
+  font-weight: 500;
+}
+
+.muted {
+  color: #a1a1aa;
+}
+
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+@media (min-width: 960px) {
+  .cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.gpu-card {
+  background: #111111;
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card-top {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.card-top h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.mark {
+  flex: none;
+  margin-top: 2px;
+}
+
+.watt {
+  font-size: clamp(32px, 8vw, 72px);
+  line-height: 1;
+  font-weight: 500;
+}
+
+.figures[data-stale="true"] .watt,
+.figures[data-stale="true"] dd,
+.figures[data-stale="true"] .meter {
+  opacity: 0.45;
+}
+
+.meter {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  background: #fafafa;
+}
+
+.sensors {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 16px;
+  margin: 0;
+}
+
+.sensors dt {
+  color: #a1a1aa;
+}
+
+.sensors dd {
+  margin: 0;
+  text-align: right;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+}

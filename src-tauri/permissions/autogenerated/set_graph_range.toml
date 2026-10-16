@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-graph-range"
+description = "Enables the set_graph_range command without any pre-configured scope."
+commands.allow = ["set_graph_range"]
+
+[[permission]]
+identifier = "deny-set-graph-range"
+description = "Denies the set_graph_range command without any pre-configured scope."
+commands.deny = ["set_graph_range"]
