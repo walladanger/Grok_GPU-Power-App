@@ -302,7 +302,7 @@ fn push_json_string(out: &mut String, value: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{gtx1050_error, rtx3090_primary, ProcessRow};
+    use crate::{amd_raphael, gtx1050_error, rtx3090_primary, rtx3090_secondary, ProcessRow};
 
     #[test]
     fn csv_header_matches_spec_and_blank_sensor_stays_empty() {
@@ -350,5 +350,111 @@ mod tests {
         card.name = "RTX, 3090".into();
         let row = csv_row("t", &card);
         assert!(row.contains("\"RTX, 3090\""));
+    }
+
+    #[test]
+    fn test_csv_exact_columns_and_counts() {
+        let header = csv_header();
+        let header_cols: Vec<_> = header.split(',').collect();
+        assert_eq!(header_cols, EXPORT_COLUMNS);
+
+        let fixtures = [
+            amd_raphael(),
+            gtx1050_error(),
+            rtx3090_primary(),
+            rtx3090_secondary(),
+        ];
+
+        for card in &fixtures {
+            let row = csv_row("2026-09-24T21:29:08-07:00", card);
+            let mut cols = 1;
+            let mut in_quotes = false;
+            for ch in row.chars() {
+                if ch == '"' {
+                    in_quotes = !in_quotes;
+                } else if ch == ',' && !in_quotes {
+                    cols += 1;
+                }
+            }
+            assert_eq!(cols, EXPORT_COLUMNS.len());
+        }
+    }
+
+    #[test]
+    fn test_csv_row_escaping() {
+        let mut card = rtx3090_primary();
+        card.name = "RTX, 3090\n\"Edition\"".into();
+        let row = csv_row("2026-09-24T21:29:08-07:00", &card);
+        let expected = "\"RTX, 3090\n\"\"Edition\"\"\"";
+        assert!(row.contains(expected));
+    }
+
+    #[test]
+    fn test_none_null_fields_rendered_exactly() {
+        let mut card = gtx1050_error();
+        card.error = Some("device error".into());
+        let fields = export_fields("2026-09-24T21:29:08-07:00", &card);
+
+        let power_instant_idx = EXPORT_COLUMNS
+            .iter()
+            .position(|&c| c == "power_draw_instant_w")
+            .unwrap();
+        assert_eq!(fields[power_instant_idx], "");
+
+        let error_idx = EXPORT_COLUMNS
+            .iter()
+            .position(|&c| c == "error")
+            .unwrap();
+        assert_eq!(fields[error_idx], "device error");
+    }
+
+    #[test]
+    fn test_jsonl_line_parses_valid_json() {
+        let card = rtx3090_primary();
+        let line = jsonl_line("2026-09-24T21:29:08-07:00", &card);
+
+        assert!(!line.ends_with('\n'));
+
+        let parsed: serde_json::Value = serde_json::from_str(&line).expect("parses as valid JSON");
+
+        assert_eq!(parsed["timestamp_iso"], "2026-09-24T21:29:08-07:00");
+        assert_eq!(parsed["vendor"], "nvidia");
+        assert_eq!(parsed["name"], "NVIDIA GeForce RTX 3090");
+        assert_eq!(parsed["power_draw_instant_w"], "8.24");
+        assert_eq!(parsed["temperature_gpu_c"], "37");
+        assert_eq!(parsed["temperature_memory_c"], "");
+    }
+
+    #[test]
+    fn test_xml_export_zero_pushes() {
+        let xml = XmlExport::new();
+        let result = xml.finish();
+        assert_eq!(result, "<samples></samples>");
+    }
+
+    #[test]
+    fn test_xml_export_multiple_cards() {
+        let mut xml = XmlExport::new();
+
+        let mut card1 = rtx3090_primary();
+        card1.name = "RTX < 3090 & \"Friends\" >".into();
+
+        let card2 = amd_raphael();
+
+        xml.push("2026-09-24T21:29:08-07:00", &[card1, card2]);
+        xml.push("2026-09-24T21:29:09-07:00", &[rtx3090_secondary()]);
+
+        let result = xml.finish();
+
+        assert!(result.starts_with("<samples>"));
+        assert!(result.ends_with("</samples>"));
+
+        assert!(result.contains("<sample time=\"2026-09-24T21:29:08-07:00\">"));
+        assert!(result.contains("<sample time=\"2026-09-24T21:29:09-07:00\">"));
+        assert!(result.contains("</sample>"));
+        assert!(result.contains("<gpu "));
+        assert!(result.contains("/>"));
+
+        assert!(result.contains("name=\"RTX &lt; 3090 &amp; &quot;Friends&quot; >\""));
     }
 }
