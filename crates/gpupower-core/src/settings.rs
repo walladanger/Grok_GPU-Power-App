@@ -221,21 +221,30 @@ mod tests {
             LoadSettings::Ready(s) => assert_eq!(s.icon_mode, IconMode::Combined),
             LoadSettings::Corrupt => panic!("Failed to load Combined"),
         }
-        assert_eq!(serde_json::to_string(&IconMode::Combined).unwrap(), "\"Combined\"");
+        assert_eq!(
+            serde_json::to_string(&IconMode::Combined).unwrap(),
+            "\"Combined\""
+        );
 
         // Busiest
         match load_settings("{\"icon_mode\": \"Busiest\"}") {
             LoadSettings::Ready(s) => assert_eq!(s.icon_mode, IconMode::Busiest),
             LoadSettings::Corrupt => panic!("Failed to load Busiest"),
         }
-        assert_eq!(serde_json::to_string(&IconMode::Busiest).unwrap(), "\"Busiest\"");
+        assert_eq!(
+            serde_json::to_string(&IconMode::Busiest).unwrap(),
+            "\"Busiest\""
+        );
 
         // HighestPercent
         match load_settings("{\"icon_mode\": \"HighestPercent\"}") {
             LoadSettings::Ready(s) => assert_eq!(s.icon_mode, IconMode::HighestPercent),
             LoadSettings::Corrupt => panic!("Failed to load HighestPercent"),
         }
-        assert_eq!(serde_json::to_string(&IconMode::HighestPercent).unwrap(), "\"HighestPercent\"");
+        assert_eq!(
+            serde_json::to_string(&IconMode::HighestPercent).unwrap(),
+            "\"HighestPercent\""
+        );
     }
 
     #[test]

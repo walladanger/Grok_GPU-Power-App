@@ -401,10 +401,7 @@ mod tests {
             .unwrap();
         assert_eq!(fields[power_instant_idx], "");
 
-        let error_idx = EXPORT_COLUMNS
-            .iter()
-            .position(|&c| c == "error")
-            .unwrap();
+        let error_idx = EXPORT_COLUMNS.iter().position(|&c| c == "error").unwrap();
         assert_eq!(fields[error_idx], "device error");
     }
 
