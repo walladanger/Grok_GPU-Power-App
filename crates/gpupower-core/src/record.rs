@@ -141,7 +141,143 @@ fn stop_reason(error: &WriteError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{rtx3090_primary, AdapterSnapshot, Sampler, VendorSource};
+    use crate::{amd_raphael, gtx1050_error, rtx3090_primary, AdapterSnapshot, Sampler, VendorSource};
+
+    struct StringWriter(String);
+    impl SampleWriter for StringWriter {
+        fn write_chunk(&mut self, text: &str) -> Result<(), WriteError> {
+            self.0.push_str(text);
+            Ok(())
+        }
+    }
+
+    struct FailingWriter(WriteError);
+    impl SampleWriter for FailingWriter {
+        fn write_chunk(&mut self, _: &str) -> Result<(), WriteError> {
+            Err(self.0.clone())
+        }
+    }
+
+    struct FailingOnSecondWriter(WriteError, usize);
+    impl SampleWriter for FailingOnSecondWriter {
+        fn write_chunk(&mut self, _: &str) -> Result<(), WriteError> {
+            self.1 += 1;
+            if self.1 == 2 {
+                Err(self.0.clone())
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    #[test]
+    fn test_recorder_csv() {
+        let mut recorder = Recorder::start(RecordFormat::Csv, StringWriter(String::new()));
+
+        let rtx = rtx3090_primary();
+        let mut gtx = gtx1050_error();
+        gtx.error = Some("device error".to_string());
+        let amd = amd_raphael();
+
+        let step = recorder.push("t", &[rtx.clone(), gtx.clone(), amd.clone()]);
+        assert_eq!(step, RecordStep::Wrote);
+
+        let finished = recorder.finish_document();
+        assert_eq!(finished, Ok(String::new()));
+
+        let expected = format!(
+            "{}\n{}\n{}\n{}\n",
+            csv_header(),
+            csv_row("t", &rtx),
+            csv_row("t", &gtx),
+            csv_row("t", &amd)
+        );
+        assert_eq!(recorder.writer.0, expected);
+    }
+
+    #[test]
+    fn test_recorder_jsonl() {
+        let mut recorder = Recorder::start(RecordFormat::Jsonl, StringWriter(String::new()));
+
+        let rtx = rtx3090_primary();
+        let mut gtx = gtx1050_error();
+        gtx.error = Some("device error".to_string());
+        let amd = amd_raphael();
+
+        let step = recorder.push("t", &[rtx.clone(), gtx.clone(), amd.clone()]);
+        assert_eq!(step, RecordStep::Wrote);
+
+        let finished = recorder.finish_document();
+        assert_eq!(finished, Ok(String::new()));
+
+        let expected = format!(
+            "{}\n{}\n{}\n",
+            jsonl_line("t", &rtx),
+            jsonl_line("t", &gtx),
+            jsonl_line("t", &amd)
+        );
+        assert_eq!(recorder.writer.0, expected);
+    }
+
+    #[test]
+    fn test_recorder_xml() {
+        let mut recorder = Recorder::start(RecordFormat::Xml, StringWriter(String::new()));
+
+        let rtx = rtx3090_primary();
+        let mut gtx = gtx1050_error();
+        gtx.error = Some("device error".to_string());
+        let amd = amd_raphael();
+
+        let fixtures = [rtx, gtx, amd];
+        let step = recorder.push("t", &fixtures);
+        assert_eq!(step, RecordStep::Wrote);
+
+        let finished = recorder.finish_document();
+        assert_eq!(finished, Ok("</samples>".to_string()));
+
+        let expected = format!(
+            "<samples>{}</samples>",
+            xml_sample_chunk("t", &fixtures)
+        );
+        assert_eq!(recorder.writer.0, expected);
+    }
+
+    #[test]
+    fn test_recorder_empty() {
+        let mut recorder_csv = Recorder::start(RecordFormat::Csv, StringWriter(String::new()));
+        assert_eq!(recorder_csv.finish_document(), Ok(String::new()));
+        assert_eq!(recorder_csv.writer.0, format!("{}\n", csv_header()));
+
+        let mut recorder_jsonl = Recorder::start(RecordFormat::Jsonl, StringWriter(String::new()));
+        assert_eq!(recorder_jsonl.finish_document(), Ok(String::new()));
+        assert_eq!(recorder_jsonl.writer.0, "");
+
+        let mut recorder_xml = Recorder::start(RecordFormat::Xml, StringWriter(String::new()));
+        assert_eq!(recorder_xml.finish_document(), Ok("</samples>".to_string()));
+        assert_eq!(recorder_xml.writer.0, "<samples></samples>");
+    }
+
+    #[test]
+    fn test_recorder_write_error() {
+        // Failing on start for Csv
+        let mut recorder = Recorder::start(RecordFormat::Csv, FailingWriter(WriteError::DiskFull));
+        assert_eq!(recorder.stopped, Some(DISK_FULL_REASON.to_string()));
+        let step = recorder.push("t", &[]);
+        assert_eq!(step, RecordStep::Stopped { reason: DISK_FULL_REASON.to_string() });
+        assert_eq!(recorder.finish_document(), Ok(String::new())); // Returns Ok("") since it's stopped and not Xml
+
+        // Failing on push for Jsonl (start succeeds because it doesn't write)
+        let mut recorder = Recorder::start(RecordFormat::Jsonl, FailingWriter(WriteError::Unavailable("broken".into())));
+        assert_eq!(recorder.stopped, None);
+        let step = recorder.push("t", &[rtx3090_primary()]);
+        assert_eq!(step, RecordStep::Stopped { reason: UNAVAILABLE_REASON.to_string() });
+        assert_eq!(recorder.stopped, Some(UNAVAILABLE_REASON.to_string()));
+
+        // Failing on finish for Xml
+        let mut recorder = Recorder::start(RecordFormat::Xml, FailingOnSecondWriter(WriteError::DiskFull, 0));
+        assert_eq!(recorder.finish_document(), Err(WriteError::DiskFull));
+        assert_eq!(recorder.stopped, Some(DISK_FULL_REASON.to_string()));
+    }
 
     #[test]
     fn disk_full_stops_recording_and_keeps_sample() {
@@ -174,6 +310,22 @@ mod tests {
         .tick();
         assert_eq!(tick.cards.len(), 1);
         assert!(tick.nvidia_error.is_none());
+    }
+
+    #[test]
+    fn test_recording_file_names() {
+        assert_eq!(
+            recording_file_name("20241026-123456", RecordFormat::Csv),
+            "GpuPower-20241026-123456.csv"
+        );
+        assert_eq!(
+            recording_file_name("20241026-123456", RecordFormat::Xml),
+            "GpuPower-20241026-123456.xml"
+        );
+        assert_eq!(
+            recording_file_name("20241026-123456", RecordFormat::Jsonl),
+            "GpuPower-20241026-123456.jsonl"
+        );
     }
 
     #[test]
