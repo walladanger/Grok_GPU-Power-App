@@ -147,4 +147,83 @@ mod tests {
         assert!(card.power_draw_instant_w.is_none());
         assert!(card.vendor == Vendor::Nvidia);
     }
+
+    #[test]
+    fn open_session_with_zero_one_and_several_cards() {
+        let zero = open_session(&[]);
+        assert!(zero.cards.is_empty());
+
+        let one_card = rtx3090_primary();
+        let one = open_session(std::slice::from_ref(&one_card));
+        assert_eq!(one.cards.len(), 1);
+        assert_eq!(one.cards[0].snapshot.id, one_card.id);
+        assert!(one.cards[0].history.is_empty());
+        assert!(one.cards[0].offline_since.is_none());
+
+        let c1 = rtx3090_primary();
+        let c2 = rtx3090_secondary();
+        let c3 = amd_raphael();
+        let several = open_session(&[c1.clone(), c2.clone(), c3.clone()]);
+        assert_eq!(several.cards.len(), 3);
+        assert_eq!(several.cards[0].snapshot.id, c1.id);
+        assert_eq!(several.cards[1].snapshot.id, c2.id);
+        assert_eq!(several.cards[2].snapshot.id, c3.id);
+    }
+
+    #[test]
+    fn reconcile_when_card_is_new_disappears_and_reappears() {
+        let card = rtx3090_primary();
+        let session0 = open_session(&[]);
+
+        let session1 = reconcile(&session0, std::slice::from_ref(&card), "t1");
+        assert_eq!(session1.cards.len(), 1);
+        assert_eq!(session1.cards[0].snapshot.id, card.id);
+        assert!(session1.cards[0].offline_since.is_none());
+        assert_eq!(session1.cards[0].history.len(), 1);
+        assert_eq!(session1.cards[0].history[0].at, "t1");
+
+        let session2 = reconcile(&session1, &[], "t2");
+        assert_eq!(session2.cards.len(), 1);
+        assert_eq!(session2.cards[0].snapshot.id, card.id);
+        assert_eq!(session2.cards[0].offline_since.as_deref(), Some("t2"));
+        assert_eq!(session2.cards[0].history.len(), 1);
+
+        let session3 = reconcile(&session2, std::slice::from_ref(&card), "t3");
+        assert_eq!(session3.cards.len(), 1);
+        assert_eq!(session3.cards[0].snapshot.id, card.id);
+        assert!(session3.cards[0].offline_since.is_none());
+        assert_eq!(session3.cards[0].history.len(), 2);
+        assert_eq!(session3.cards[0].history[1].at, "t3");
+    }
+
+    #[test]
+    fn reconcile_when_ids_repeat() {
+        let card = rtx3090_primary();
+        let session0 = open_session(std::slice::from_ref(&card));
+        let session1 = reconcile(&session0, &[card.clone(), card.clone()], "t1");
+        assert_eq!(session1.cards.len(), 1);
+        assert_eq!(session1.cards[0].snapshot.id, card.id);
+        assert_eq!(session1.cards[0].history.len(), 1);
+        assert_eq!(session1.cards[0].history[0].at, "t1");
+    }
+
+    #[test]
+    fn stamp_output_fields_for_rfc3339_and_integer() {
+        let card = rtx3090_primary();
+        let session0 = open_session(&[]);
+
+        let session1 = reconcile(
+            &session0,
+            std::slice::from_ref(&card),
+            "2024-01-01T12:00:00Z",
+        );
+        assert_eq!(session1.cards.len(), 1);
+        assert_eq!(session1.cards[0].history[0].at, "2024-01-01T12:00:00Z");
+        assert_eq!(session1.cards[0].history[0].unix, 0);
+
+        let session2 = reconcile(&session0, std::slice::from_ref(&card), "1700000000");
+        assert_eq!(session2.cards.len(), 1);
+        assert_eq!(session2.cards[0].history[0].at, "1700000000");
+        assert_eq!(session2.cards[0].history[0].unix, 1700000000);
+    }
 }
