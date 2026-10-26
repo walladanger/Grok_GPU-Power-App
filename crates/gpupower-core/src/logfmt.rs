@@ -103,4 +103,102 @@ mod tests {
         assert!(should_rotate(2 * 1024 * 1024 + 1));
         assert_eq!(LOG_KEEP_FILES, 3);
     }
+
+    #[test]
+    fn test_severity_display() {
+        assert_eq!(Severity::Error.to_string(), "error");
+        assert_eq!(Severity::Warn.to_string(), "warn");
+        assert_eq!(Severity::Info.to_string(), "info");
+    }
+
+    #[test]
+    fn test_format_log_line() {
+        let info_line = LogLine {
+            at: AT.to_owned(),
+            severity: Severity::Info,
+            feature: "sampler".to_owned(),
+            message: "ok".to_owned(),
+        };
+        assert_eq!(
+            format_log_line(&info_line),
+            "2026-09-24T21:29:08-07:00 info sampler ok"
+        );
+
+        let warn_line = LogLine {
+            at: AT.to_owned(),
+            severity: Severity::Warn,
+            feature: "sampler".to_owned(),
+            message: "warning".to_owned(),
+        };
+        assert_eq!(
+            format_log_line(&warn_line),
+            "2026-09-24T21:29:08-07:00 warn sampler warning"
+        );
+
+        let error_line = LogLine {
+            at: AT.to_owned(),
+            severity: Severity::Error,
+            feature: "sampler".to_owned(),
+            message: "failed".to_owned(),
+        };
+        assert_eq!(
+            format_log_line(&error_line),
+            "2026-09-24T21:29:08-07:00 error sampler failed"
+        );
+    }
+
+    #[test]
+    fn test_sample_tick_line_exact_contents() {
+        assert!(sample_tick_line(AT, false, false, None, "ok").is_none());
+        assert!(sample_tick_line(AT, true, false, None, "ok").is_none());
+
+        let nvidia_err =
+            sample_tick_line(AT, true, true, Some("NVML_ERROR_UNKNOWN"), "nvidia error").unwrap();
+        assert_eq!(
+            nvidia_err,
+            LogLine {
+                at: AT.to_owned(),
+                severity: Severity::Error,
+                feature: "sampler".to_owned(),
+                message: "nvidia error (NVML_ERROR_UNKNOWN)".to_owned(),
+            }
+        );
+
+        let amd_err = sample_tick_line(AT, true, true, Some("ADLX_FAIL"), "amd error").unwrap();
+        assert_eq!(
+            amd_err,
+            LogLine {
+                at: AT.to_owned(),
+                severity: Severity::Error,
+                feature: "sampler".to_owned(),
+                message: "amd error (ADLX_FAIL)".to_owned(),
+            }
+        );
+
+        let both_err = sample_tick_line(
+            AT,
+            true,
+            true,
+            Some("NVML_ERROR_UNKNOWN, ADLX_FAIL"),
+            "both error",
+        )
+        .unwrap();
+        assert_eq!(
+            both_err,
+            LogLine {
+                at: AT.to_owned(),
+                severity: Severity::Error,
+                feature: "sampler".to_owned(),
+                message: "both error (NVML_ERROR_UNKNOWN, ADLX_FAIL)".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_should_rotate_boundaries() {
+        assert!(!should_rotate(0));
+        assert!(!should_rotate(LOG_ROLL_BYTES - 1));
+        assert!(!should_rotate(LOG_ROLL_BYTES));
+        assert!(should_rotate(LOG_ROLL_BYTES + 1));
+    }
 }
