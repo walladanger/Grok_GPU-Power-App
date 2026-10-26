@@ -99,8 +99,8 @@ fn percent_of_limit(card: &AdapterSnapshot) -> Option<f64> {
 mod tests {
     use super::*;
     use crate::{
-        empty_snapshot, gtx1050_error, rtx3090_primary, rtx3090_secondary, IconMode, LimitRange,
-        LimitUnit, Vendor,
+        amd_raphael, empty_snapshot, gtx1050_error, rtx3090_primary, rtx3090_secondary, IconMode,
+        LimitRange, LimitUnit, Vendor,
     };
 
     fn percent_card_without_ceiling() -> AdapterSnapshot {
@@ -155,5 +155,109 @@ mod tests {
     fn stale_is_strictly_older_than_three_seconds() {
         assert!(!is_stale(3000));
         assert!(is_stale(3001));
+    }
+
+    #[test]
+    fn combined_power_no_cards() {
+        let sum = combined_power(&[]);
+        assert_eq!(
+            sum,
+            CombinedPower {
+                watts: 0.0,
+                missing_names: vec![]
+            }
+        );
+    }
+
+    #[test]
+    fn combined_power_all_none() {
+        let sum = combined_power(&[gtx1050_error(), amd_raphael()]);
+        assert_eq!(sum.watts, 0.0);
+        assert_eq!(
+            sum.missing_names,
+            vec![
+                "NVIDIA GeForce GTX 1050".to_string(),
+                "AMD Radeon Graphics".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn combined_power_mixed_watts_percent() {
+        let sum = combined_power(&[rtx3090_primary(), percent_card_without_ceiling()]);
+        assert_eq!(sum.watts, 48.24);
+        assert!(sum.missing_names.is_empty());
+    }
+
+    #[test]
+    fn icon_number_empty_and_no_readings() {
+        assert_eq!(icon_number(IconMode::Combined, &[]), None);
+        assert_eq!(icon_number(IconMode::Busiest, &[]), None);
+        assert_eq!(icon_number(IconMode::HighestPercent, &[]), None);
+
+        let dead_cards = [gtx1050_error(), amd_raphael()];
+        assert_eq!(icon_number(IconMode::Combined, &dead_cards), None);
+        assert_eq!(icon_number(IconMode::Busiest, &dead_cards), None);
+        assert_eq!(icon_number(IconMode::HighestPercent, &dead_cards), None);
+    }
+
+    #[test]
+    fn icon_number_round_non_negative() {
+        let mut card1 = rtx3090_primary();
+        card1.power_draw_instant_w = Some(-0.7);
+        let mut card2 = rtx3090_primary();
+        card2.power_draw_instant_w = Some(2.5);
+
+        assert_eq!(icon_number(IconMode::Busiest, &[card1]), Some(0));
+        assert_eq!(icon_number(IconMode::Busiest, &[card2]), Some(3));
+    }
+
+    #[test]
+    fn percent_of_limit_paths() {
+        // Watts card with a valid limit (8.24 / 350.0 * 100.0 = 2.35...) rounds to 2
+        let card_watts_valid = rtx3090_primary();
+        assert_eq!(
+            icon_number(IconMode::HighestPercent, &[card_watts_valid]),
+            Some(2)
+        );
+
+        // Watts card with enforced <= 0
+        let mut card_watts_zero = rtx3090_primary();
+        if let Some(limit) = card_watts_zero.limit.as_mut() {
+            limit.enforced = 0;
+        }
+        assert_eq!(
+            icon_number(IconMode::HighestPercent, &[card_watts_zero]),
+            None
+        );
+
+        // Percent card with watt_ceiling_w > 0 (40.0 / 80.0 * 100.0 = 50.0) rounds to 50
+        let mut card_percent_valid = percent_card_without_ceiling();
+        card_percent_valid.watt_ceiling_w = Some(80.0);
+        assert_eq!(
+            icon_number(IconMode::HighestPercent, &[card_percent_valid]),
+            Some(50)
+        );
+
+        // Percent card with watt_ceiling_w <= 0.0
+        let mut card_percent_zero = percent_card_without_ceiling();
+        card_percent_zero.watt_ceiling_w = Some(0.0);
+        assert_eq!(
+            icon_number(IconMode::HighestPercent, &[card_percent_zero]),
+            None
+        );
+
+        // Percent card without watt ceiling (watt_ceiling_w is None)
+        let card_percent_none = percent_card_without_ceiling();
+        assert_eq!(
+            icon_number(IconMode::HighestPercent, &[card_percent_none]),
+            None
+        );
+    }
+
+    #[test]
+    fn is_stale_additional_thresholds() {
+        assert!(!is_stale(0));
+        assert!(!is_stale(2999));
     }
 }
