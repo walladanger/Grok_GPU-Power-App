@@ -141,7 +141,9 @@ fn stop_reason(error: &WriteError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{amd_raphael, gtx1050_error, rtx3090_primary, AdapterSnapshot, Sampler, VendorSource};
+    use crate::{
+        amd_raphael, gtx1050_error, rtx3090_primary, AdapterSnapshot, Sampler, VendorSource,
+    };
 
     struct StringWriter(String);
     impl SampleWriter for StringWriter {
@@ -235,10 +237,7 @@ mod tests {
         let finished = recorder.finish_document();
         assert_eq!(finished, Ok("</samples>".to_string()));
 
-        let expected = format!(
-            "<samples>{}</samples>",
-            xml_sample_chunk("t", &fixtures)
-        );
+        let expected = format!("<samples>{}</samples>", xml_sample_chunk("t", &fixtures));
         assert_eq!(recorder.writer.0, expected);
     }
 
@@ -263,18 +262,34 @@ mod tests {
         let mut recorder = Recorder::start(RecordFormat::Csv, FailingWriter(WriteError::DiskFull));
         assert_eq!(recorder.stopped, Some(DISK_FULL_REASON.to_string()));
         let step = recorder.push("t", &[]);
-        assert_eq!(step, RecordStep::Stopped { reason: DISK_FULL_REASON.to_string() });
+        assert_eq!(
+            step,
+            RecordStep::Stopped {
+                reason: DISK_FULL_REASON.to_string()
+            }
+        );
         assert_eq!(recorder.finish_document(), Ok(String::new())); // Returns Ok("") since it's stopped and not Xml
 
         // Failing on push for Jsonl (start succeeds because it doesn't write)
-        let mut recorder = Recorder::start(RecordFormat::Jsonl, FailingWriter(WriteError::Unavailable("broken".into())));
+        let mut recorder = Recorder::start(
+            RecordFormat::Jsonl,
+            FailingWriter(WriteError::Unavailable("broken".into())),
+        );
         assert_eq!(recorder.stopped, None);
         let step = recorder.push("t", &[rtx3090_primary()]);
-        assert_eq!(step, RecordStep::Stopped { reason: UNAVAILABLE_REASON.to_string() });
+        assert_eq!(
+            step,
+            RecordStep::Stopped {
+                reason: UNAVAILABLE_REASON.to_string()
+            }
+        );
         assert_eq!(recorder.stopped, Some(UNAVAILABLE_REASON.to_string()));
 
         // Failing on finish for Xml
-        let mut recorder = Recorder::start(RecordFormat::Xml, FailingOnSecondWriter(WriteError::DiskFull, 0));
+        let mut recorder = Recorder::start(
+            RecordFormat::Xml,
+            FailingOnSecondWriter(WriteError::DiskFull, 0),
+        );
         assert_eq!(recorder.finish_document(), Err(WriteError::DiskFull));
         assert_eq!(recorder.stopped, Some(DISK_FULL_REASON.to_string()));
     }
