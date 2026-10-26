@@ -165,4 +165,115 @@ mod tests {
             LoadSettings::Corrupt => panic!("round trip"),
         }
     }
+
+    #[test]
+    fn test_default_settings_exact_field_values() {
+        let s = default_settings();
+        assert_eq!(s.icon_mode, IconMode::Combined);
+        assert_eq!(s.graph_range, GraphRange::Min5);
+        assert!(s.start_with_windows);
+        assert!(!s.reapply_at_sign_in);
+        assert!(!s.detailed_debug);
+        assert_eq!(s.last_recording_directory, None);
+        assert!(s.limits.is_empty());
+
+        assert_eq!(s.window.x, 80);
+        assert_eq!(s.window.y, 80);
+        assert_eq!(s.window.width, 960);
+        assert_eq!(s.window.height, 800);
+
+        assert!(s.popouts.is_empty());
+    }
+
+    #[test]
+    fn test_window_bounds_default_and_missing_keys() {
+        let default_bounds = WindowBounds::default();
+        assert_eq!(default_bounds.x, 80);
+        assert_eq!(default_bounds.y, 80);
+        assert_eq!(default_bounds.width, 960);
+        assert_eq!(default_bounds.height, 800);
+
+        match load_settings("{\"window\": {}}") {
+            LoadSettings::Ready(s) => {
+                assert_eq!(s.window.x, 80);
+                assert_eq!(s.window.y, 80);
+                assert_eq!(s.window.width, 960);
+                assert_eq!(s.window.height, 800);
+            }
+            LoadSettings::Corrupt => panic!("should parse missing window keys"),
+        }
+    }
+
+    #[test]
+    fn test_default_start_with_windows_applied() {
+        match load_settings("{}") {
+            LoadSettings::Ready(s) => {
+                assert!(s.start_with_windows);
+            }
+            LoadSettings::Corrupt => panic!("should parse empty obj"),
+        }
+    }
+
+    #[test]
+    fn test_icon_mode_serde_round_trip() {
+        // Combined
+        match load_settings("{\"icon_mode\": \"Combined\"}") {
+            LoadSettings::Ready(s) => assert_eq!(s.icon_mode, IconMode::Combined),
+            LoadSettings::Corrupt => panic!("Failed to load Combined"),
+        }
+        assert_eq!(serde_json::to_string(&IconMode::Combined).unwrap(), "\"Combined\"");
+
+        // Busiest
+        match load_settings("{\"icon_mode\": \"Busiest\"}") {
+            LoadSettings::Ready(s) => assert_eq!(s.icon_mode, IconMode::Busiest),
+            LoadSettings::Corrupt => panic!("Failed to load Busiest"),
+        }
+        assert_eq!(serde_json::to_string(&IconMode::Busiest).unwrap(), "\"Busiest\"");
+
+        // HighestPercent
+        match load_settings("{\"icon_mode\": \"HighestPercent\"}") {
+            LoadSettings::Ready(s) => assert_eq!(s.icon_mode, IconMode::HighestPercent),
+            LoadSettings::Corrupt => panic!("Failed to load HighestPercent"),
+        }
+        assert_eq!(serde_json::to_string(&IconMode::HighestPercent).unwrap(), "\"HighestPercent\"");
+    }
+
+    #[test]
+    fn test_popout_bounds_optional_missing_handling() {
+        match load_settings("{\"popouts\": [{}]}") {
+            LoadSettings::Ready(s) => {
+                assert_eq!(s.popouts.len(), 1);
+                let popout = &s.popouts[0];
+                assert_eq!(popout.card_id, "");
+                assert_eq!(popout.kind, "");
+                assert_eq!(popout.bounds.x, 80);
+                assert_eq!(popout.bounds.y, 80);
+                assert_eq!(popout.bounds.width, 960);
+                assert_eq!(popout.bounds.height, 800);
+            }
+            LoadSettings::Corrupt => panic!("should handle missing popout keys"),
+        }
+    }
+
+    #[test]
+    fn test_load_settings_edge_cases() {
+        assert!(matches!(load_settings(""), LoadSettings::Corrupt));
+
+        assert!(matches!(load_settings("{}"), LoadSettings::Ready(_)));
+
+        let default_s = default_settings();
+        let serialized = serde_json::to_string(&default_s).unwrap();
+        match load_settings(&serialized) {
+            LoadSettings::Ready(s) => assert_eq!(s, default_s),
+            LoadSettings::Corrupt => panic!("Failed round trip of default settings"),
+        }
+
+        match load_settings("{\"unknown_extra_key\": 123}") {
+            LoadSettings::Ready(s) => {
+                // Should ignore extra key and load normally
+                assert!(s.start_with_windows);
+            }
+            LoadSettings::Corrupt => panic!("Should ignore unknown extra keys"),
+        }
+    }
 }
