@@ -156,9 +156,21 @@ mod tests {
 
     #[test]
     fn nvidia_failure_still_returns_amd_cards() {
+        struct Boom;
+        impl VendorSource for Boom {
+            fn sample(&mut self) -> Result<Vec<AdapterSnapshot>, String> {
+                Err("nvidia down".into())
+            }
+        }
+        struct AmdOk;
+        impl VendorSource for AmdOk {
+            fn sample(&mut self) -> Result<Vec<AdapterSnapshot>, String> {
+                Ok(vec![amd_raphael()])
+            }
+        }
         let mut sampler = Sampler {
-            nvidia: FakeSource::err("nvidia down"),
-            amd: FakeSource::ok(vec![amd_raphael()]),
+            nvidia: Boom,
+            amd: AmdOk,
             windows: vec![],
         };
         let tick = sampler.tick();
