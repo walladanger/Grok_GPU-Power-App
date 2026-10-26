@@ -33,19 +33,24 @@ The application is split into a React frontend (`ui`) and a Rust backend (`src-t
 
 ## Quick start
 
-To start development, ensure you have Node.js and Rust installed.
+To start development, ensure you have Node.js and Rust installed. You must run the Vite dev server and the Tauri backend in two separate terminals.
+
+**Terminal 1 (Frontend):**
 
 ```bash
-# Install UI dependencies
 cd ui
 npm install
+npm run dev
+```
 
-# Run the dev server and Tauri app
-cd ../src-tauri
+**Terminal 2 (Backend):**
+
+```bash
+cd src-tauri
 cargo run
 ```
 
-To build for production:
+To build for production, you must build the UI first so the output is placed in `ui/dist`, then build the backend:
 
 ```bash
 cd ui
@@ -62,7 +67,7 @@ cargo test --workspace
 
 # Run UI tests
 cd ui
-npm run test
+npm test
 ```
 
 ## Configuration
