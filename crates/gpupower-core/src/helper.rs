@@ -207,76 +207,215 @@ mod tests {
     use crate::{LimitRange, LimitUnit, SavedLimit};
 
     #[test]
-    fn reapply_clamps_skips_and_does_not_reboot() {
-        let saved = SavedLimit {
-            unit: LimitUnit::Watts,
-            value: 50,
-        };
-        let live = LimitRange {
-            unit: LimitUnit::Watts,
-            min: 100,
-            max: 350,
-            default_value: 350,
-            current: 350,
-            enforced: 350,
-        };
+    fn parse_helper_args_success() {
         assert!(matches!(
-            plan_reapply(&saved, Some(&live)),
-            ReapplyPlan::Write {
-                value: 100,
-                clamped: true
-            }
-        ));
-        assert!(matches!(
-            plan_reapply(&saved, None),
-            ReapplyPlan::SkipAbsent
-        ));
-        let steps = follow_up(true);
-        assert!(steps.contains(&FollowUp::NotifyRebootRequired));
-        assert!(!format!("{steps:?}").contains("RebootNow"));
-    }
-
-    #[test]
-    fn parser_rejects_fan_and_accepts_apply_limit() {
-        assert!(parse_helper_args(&["--set-fan".into(), "40".into()]).is_err());
-        let cmd = parse_helper_args(&[
-            "--apply-limit".into(),
-            "--id".into(),
-            "GPU-a".into(),
-            "--unit".into(),
-            "watts".into(),
-            "--value".into(),
-            "280".into(),
-        ])
-        .unwrap();
-        assert!(matches!(
-            cmd,
-            HelperCommand::ApplyLimit {
-                value: 280,
-                unit: LimitUnit::Watts,
-                ..
-            }
+            parse_helper_args(&["--apply-saved".into()]).unwrap(),
+            HelperCommand::ApplySaved
         ));
         assert!(matches!(
             parse_helper_args(&["--install-reapply-task".into()]).unwrap(),
             HelperCommand::InstallReapplyTask
         ));
+        assert!(matches!(
+            parse_helper_args(&["--remove-reapply-task".into()]).unwrap(),
+            HelperCommand::RemoveReapplyTask
+        ));
+
+        let apply_limit = parse_helper_args(&[
+            "--apply-limit".into(),
+            "--id".into(),
+            "foo".into(),
+            "--unit".into(),
+            "watts".into(),
+            "--value".into(),
+            "100".into(),
+        ]).unwrap();
+        assert!(matches!(
+            apply_limit,
+            HelperCommand::ApplyLimit {
+                id,
+                unit: LimitUnit::Watts,
+                value: 100,
+            } if id == "foo"
+        ));
+
+        let reinstall = parse_helper_args(&[
+            "--reinstall-driver".into(),
+            "--inf".into(),
+            "foo.inf".into(),
+            "--device".into(),
+            "PCI\\VEN_1234".into(),
+        ]).unwrap();
+        assert!(matches!(
+            reinstall,
+            HelperCommand::Reinstall {
+                inf,
+                device_ids,
+            } if inf == "foo.inf" && device_ids == vec!["PCI\\VEN_1234"]
+        ));
+
+        let rollback = parse_helper_args(&[
+            "--rollback-driver".into(),
+            "--device".into(),
+            "PCI\\VEN_1234".into(),
+        ]).unwrap();
+        assert!(matches!(
+            rollback,
+            HelperCommand::Rollback {
+                device_id,
+            } if device_id == "PCI\\VEN_1234"
+        ));
     }
 
     #[test]
-    fn partial_apply_names_the_failed_card() {
-        let text = partial_apply_message(&[
-            ("NVIDIA GeForce RTX 3090".into(), Ok(())),
-            ("AMD Radeon Graphics".into(), Err("refused".into())),
-        ]);
-        assert!(text.contains("AMD Radeon Graphics"));
+    fn parse_helper_args_errors() {
+        let err = parse_helper_args(&[]).unwrap_err();
+        assert_eq!(err, "missing helper command");
+
+        let err = parse_helper_args(&["--unknown-cmd".into()]).unwrap_err();
+        assert_eq!(err, "unknown helper command: --unknown-cmd");
+
+        let err = parse_helper_args(&["--apply-saved".into(), "foo".into()]).unwrap_err();
+        assert_eq!(err, "unexpected argument: foo");
+
+        let err = parse_helper_args(&["--apply-limit".into(), "foo".into()]).unwrap_err();
+        assert_eq!(err, "unexpected argument: foo");
+
+        let err = parse_helper_args(&["--apply-limit".into(), "--id".into()]).unwrap_err();
+        assert_eq!(err, "missing value for --id");
+
+        let err = parse_helper_args(&["--apply-limit".into(), "--id".into(), "--unit".into()]).unwrap_err();
+        assert_eq!(err, "missing value for --id");
+
+        let err = parse_helper_args(&["--apply-limit".into(), "--id".into(), "a".into(), "--id".into(), "b".into()]).unwrap_err();
+        assert_eq!(err, "duplicate --id");
+
+        let err = parse_helper_args(&["--apply-limit".into(), "--unknown".into(), "val".into()]).unwrap_err();
+        assert_eq!(err, "unknown argument: --unknown");
+
+        let err = parse_helper_args(&["--apply-limit".into(), "--id".into(), "a".into(), "--unit".into(), "watts".into()]).unwrap_err();
+        assert_eq!(err, "--apply-limit requires --id, --unit, and --value");
+
+        let err = parse_helper_args(&["--apply-limit".into(), "--id".into(), "a".into(), "--unit".into(), "foo".into(), "--value".into(), "10".into()]).unwrap_err();
+        assert_eq!(err, "unknown unit: foo");
+
+        let err = parse_helper_args(&["--apply-limit".into(), "--id".into(), "a".into(), "--unit".into(), "watts".into(), "--value".into(), "foo".into()]).unwrap_err();
+        assert_eq!(err, "invalid --value: foo");
+
+        let err = parse_helper_args(&["--reinstall-driver".into(), "--device".into(), "a".into()]).unwrap_err();
+        assert_eq!(err, "--reinstall-driver requires --inf");
+
+        let err = parse_helper_args(&["--reinstall-driver".into(), "--inf".into(), "a".into()]).unwrap_err();
+        assert_eq!(err, "--reinstall-driver requires --device");
+
+        let err = parse_helper_args(&["--rollback-driver".into(), "--inf".into(), "a".into()]).unwrap_err();
+        assert_eq!(err, "unknown argument: --inf");
+
+        let err = parse_helper_args(&["--rollback-driver".into()]).unwrap_err();
+        assert_eq!(err, "--rollback-driver requires --device");
     }
 
     #[test]
-    fn cancelled_approval_has_stable_copy() {
-        assert_eq!(
-            approval_cancelled_message(),
-            "Administrator approval was cancelled. The limit is unchanged."
+    fn plan_reapply_tests() {
+        let saved = SavedLimit {
+            unit: LimitUnit::Watts,
+            value: 100,
+        };
+
+        assert!(matches!(
+            plan_reapply(&saved, None),
+            ReapplyPlan::SkipAbsent
+        ));
+
+        let live_percent = LimitRange {
+            unit: LimitUnit::Percent,
+            min: 50,
+            max: 150,
+            default_value: 100,
+            current: 100,
+            enforced: 100,
+        };
+        assert!(matches!(
+            plan_reapply(&saved, Some(&live_percent)),
+            ReapplyPlan::SkipAbsent
+        ));
+
+        let live_watts = LimitRange {
+            unit: LimitUnit::Watts,
+            min: 50,
+            max: 150,
+            default_value: 100,
+            current: 100,
+            enforced: 100,
+        };
+        assert!(matches!(
+            plan_reapply(&saved, Some(&live_watts)),
+            ReapplyPlan::Write { value: 100, clamped: false }
+        ));
+
+        let saved_low = SavedLimit {
+            unit: LimitUnit::Watts,
+            value: 30,
+        };
+        assert!(matches!(
+            plan_reapply(&saved_low, Some(&live_watts)),
+            ReapplyPlan::Write { value: 50, clamped: true }
+        ));
+
+        let saved_high = SavedLimit {
+            unit: LimitUnit::Watts,
+            value: 200,
+        };
+        assert!(matches!(
+            plan_reapply(&saved_high, Some(&live_watts)),
+            ReapplyPlan::Write { value: 150, clamped: true }
+        ));
+    }
+
+    #[test]
+    fn follow_up_tests() {
+        let steps_false = follow_up(false);
+        assert!(steps_false.is_empty());
+
+        let steps_true = follow_up(true);
+        assert!(
+            steps_true == vec![FollowUp::NotifyRebootRequired, FollowUp::ReapplyOnNextSignIn]
         );
+    }
+
+    #[test]
+    fn partial_apply_message_tests() {
+        let msg_ok = partial_apply_message(&[("GPU1".into(), Ok(()))]);
+        assert_eq!(msg_ok, "Applied.");
+
+        let msg_mixed = partial_apply_message(&[
+            ("GPU1".into(), Ok(())),
+            ("GPU2".into(), Err("fail".into())),
+        ]);
+        assert_eq!(msg_mixed, "GPU2");
+
+        let msg_failed = partial_apply_message(&[
+            ("GPU1".into(), Err("fail".into())),
+            ("GPU2".into(), Err("fail".into())),
+        ]);
+        assert_eq!(msg_failed, "GPU1, GPU2");
+    }
+
+    #[test]
+    fn approval_cancelled_message_tests() {
+        assert!(
+            approval_cancelled_message() == "Administrator approval was cancelled. The limit is unchanged."
+        );
+    }
+
+    #[test]
+    fn format_helper_stdout_tests() {
+        let report = HelperReport {
+            ok: true,
+            message: "Done".to_string(),
+            reboot_required: false,
+        };
+        let json = format_helper_stdout(&report);
+        assert_eq!(json, r#"{"ok":true,"message":"Done","reboot_required":false}"#);
     }
 }
