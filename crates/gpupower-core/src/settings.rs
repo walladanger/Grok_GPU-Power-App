@@ -171,9 +171,9 @@ mod tests {
         let s = default_settings();
         assert_eq!(s.icon_mode, IconMode::Combined);
         assert_eq!(s.graph_range, GraphRange::Min5);
-        assert_eq!(s.start_with_windows, true);
-        assert_eq!(s.reapply_at_sign_in, false);
-        assert_eq!(s.detailed_debug, false);
+        assert!(s.start_with_windows);
+        assert!(!s.reapply_at_sign_in);
+        assert!(!s.detailed_debug);
         assert_eq!(s.last_recording_directory, None);
         assert!(s.limits.is_empty());
 
@@ -208,7 +208,7 @@ mod tests {
     fn test_default_start_with_windows_applied() {
         match load_settings("{}") {
             LoadSettings::Ready(s) => {
-                assert_eq!(s.start_with_windows, true);
+                assert!(s.start_with_windows);
             }
             LoadSettings::Corrupt => panic!("should parse empty obj"),
         }
@@ -271,7 +271,7 @@ mod tests {
         match load_settings("{\"unknown_extra_key\": 123}") {
             LoadSettings::Ready(s) => {
                 // Should ignore extra key and load normally
-                assert_eq!(s.start_with_windows, true);
+                assert!(s.start_with_windows);
             }
             LoadSettings::Corrupt => panic!("Should ignore unknown extra keys"),
         }
