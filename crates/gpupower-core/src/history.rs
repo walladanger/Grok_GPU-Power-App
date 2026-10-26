@@ -150,4 +150,61 @@ mod tests {
         h.push(sample_at(600));
         assert_eq!(h.window(GraphRange::Min5).len(), 1);
     }
+
+    #[test]
+    fn test_history_new_is_empty() {
+        let h = History::new();
+        assert_eq!(h.len(), 0);
+        assert!(h.is_empty());
+        assert!(h.as_slice().is_empty());
+    }
+
+    #[test]
+    fn test_push_beyond_retention_limit_drops_oldest() {
+        let mut h = History::new();
+        h.push(sample_at(0));
+        h.push(sample_at(15 * 60 - 1));
+        h.push(sample_at(15 * 60));
+        h.push(sample_at(15 * 60 + 1));
+        assert_eq!(h.len(), 3);
+        assert_eq!(h.as_slice()[0].unix, 899);
+        assert_eq!(h.as_slice()[2].unix, 901);
+    }
+
+    #[test]
+    fn test_window_range_inclusivity() {
+        let mut h = History::new();
+        for unix in [99, 100, 699, 700, 939, 940, 1000] {
+            h.push(sample_at(unix));
+        }
+
+        let min1 = h.window(GraphRange::Min1);
+        assert_eq!(min1.len(), 2);
+        assert_eq!(min1[0].unix, 940);
+        assert_eq!(min1[1].unix, 1000);
+
+        let min5 = h.window(GraphRange::Min5);
+        assert_eq!(min5.len(), 4);
+        assert_eq!(min5[0].unix, 700);
+        assert_eq!(min5[1].unix, 939);
+        assert_eq!(min5[2].unix, 940);
+        assert_eq!(min5[3].unix, 1000);
+
+        let min15 = h.window(GraphRange::Min15);
+        assert_eq!(min15.len(), 6);
+        assert_eq!(min15[0].unix, 100);
+        assert_eq!(min15[5].unix, 1000);
+    }
+
+    #[test]
+    fn test_snap_index_cases() {
+        let empty: &[StampedSample] = &[];
+        assert_eq!(snap_index(empty, 5), None);
+
+        let samples = [sample_at(10), sample_at(20)];
+        assert_eq!(snap_index(&samples, 5), Some(0));
+        assert_eq!(snap_index(&samples, 25), Some(1));
+        assert_eq!(snap_index(&samples, 20), Some(1));
+        assert_eq!(snap_index(&samples, 15), Some(0));
+    }
 }
