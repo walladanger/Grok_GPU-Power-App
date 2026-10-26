@@ -286,7 +286,7 @@ mod tests {
             },
         ];
 
-        let merged = merge_adapters(&windows, &[card.clone()], &[]);
+        let merged = merge_adapters(&windows, std::slice::from_ref(&card), &[]);
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].id, card.id);
         assert_eq!(merged[1].id, "PNP2"); // Unmatched fallback
