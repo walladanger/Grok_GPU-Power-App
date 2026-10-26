@@ -126,7 +126,7 @@ mod tests {
         assert_eq!(snapshot.name, "name1");
         assert_eq!(snapshot.pci_bus_id, String::new());
         assert_eq!(snapshot.status, "OK");
-        assert_eq!(snapshot.can_set_limit, false);
+        assert!(!snapshot.can_set_limit);
         assert_eq!(snapshot.limit, None);
         assert_eq!(snapshot.power_draw_instant_w, None);
         assert_eq!(snapshot.power_draw_average_w, None);
@@ -169,7 +169,10 @@ mod tests {
 
     #[test]
     fn test_vendor_serde() {
-        assert_eq!(serde_json::to_string(&Vendor::Nvidia).unwrap(), "\"nvidia\"");
+        assert_eq!(
+            serde_json::to_string(&Vendor::Nvidia).unwrap(),
+            "\"nvidia\""
+        );
         assert_eq!(serde_json::to_string(&Vendor::Amd).unwrap(), "\"amd\"");
         assert_eq!(serde_json::to_string(&Vendor::Other).unwrap(), "\"other\"");
     }
